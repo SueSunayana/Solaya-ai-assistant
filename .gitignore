@@ -1,0 +1,4 @@
+.env
+LosslessCut-win-x64/*
+__pycache__/
+*.mp4
