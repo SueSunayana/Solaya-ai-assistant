@@ -437,11 +437,11 @@ async def stream_video(filename: str, request: Request, range: str = Header(None
         return StreamingResponse(file_iterator(), status_code=200, headers=headers)
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, voice: str = "Despina", resume: str = "false"):
+async def websocket_endpoint(websocket: WebSocket, voice: str = "Aoede", resume: str = "false"):
     await websocket.accept()
     
     is_resume = resume.lower() == "true"
-    ai_name = "Solaya" if voice == "Despina" else "Sam"
+    ai_name = "Solaya" if voice == "Aoede" else "Solaya"
     
     if not is_resume:
         stage_1 = f'- **STAGE 1: STARTUP GREETING (TURN 0):** Respond to the trigger message "The session has started..." by ONLY greeting the user exactly with these words: "Hello... I am {ai_name}... Welcome... Before we begin... please choose a voice card... I will show them to you now." Speak this EXTREMELY slowly and softly. You MUST call the `show_voice_menu` tool immediately in this same turn! Do NOT open the environment menu yet. Wait for the user to select a voice.'

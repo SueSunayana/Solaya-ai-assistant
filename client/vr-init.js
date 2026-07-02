@@ -603,7 +603,7 @@ const { scene, renderer, camera, sphere, geometry, particleCount,
     femaleCard.position.set(0.6, 1.6, -2.5);
     femaleCard.lookAt(0, 1.6, 0);
     femaleCard.userData.isVoiceCard = true;
-    femaleCard.userData.voiceName = 'Despina';
+    femaleCard.userData.voiceName = 'Aoede';
     vrState.menuGroup.add(femaleCard);
     vrState.interactables.push(femaleCard);
 

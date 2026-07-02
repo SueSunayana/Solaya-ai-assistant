@@ -345,7 +345,7 @@ async function startJourney(options = {}) {
   bgMusic.play().catch(e => console.warn("[Aura] BG Music play failed at start:", e));
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const voiceParam = options.voice ? `voice=${options.voice}` : `voice=Despina`;
+  const voiceParam = options.voice ? `voice=${options.voice}` : `voice=Aoede`;
   const resumeParam = options.resume ? `&resume=true` : `&resume=false`;
   ws = new WebSocket(`${protocol}//${window.location.host}/ws?${voiceParam}${resumeParam}`);
   ws.binaryType = 'arraybuffer';
@@ -425,7 +425,7 @@ async function startJourney(options = {}) {
         clearAudioQueue();
       } else if (data.action === "trigger_scene") {
         console.log("[Aura] TRIGGER DETECTED:", data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
-        
+
         // Auto-generated VIDEO_MAP matching handleSceneChange logic to check if we are already in/loading this scene
         const VIDEO_MAP = {};
         if (Array.isArray(ENVIRONMENTS)) {
@@ -1109,7 +1109,7 @@ voiceCards.forEach(card => {
 
     // Check if we need to switch voice
     const url = ws.url;
-    const currentVoice = url.includes('voice=Enceladus') ? 'Enceladus' : 'Despina';
+    const currentVoice = url.includes('voice=Enceladus') ? 'Enceladus' : 'Aoede';
 
     if (selectedVoice !== currentVoice) {
       console.log("[Aura] Switching voice to " + selectedVoice);
