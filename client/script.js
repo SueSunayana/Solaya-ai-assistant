@@ -541,10 +541,28 @@ function clearMenuTimers() {
 
 let countdownInterval = null;
 let timerTimeLeft = 600;
+let sessionTimerStartedAt = null; // Tracks when the 10-min session clock began (persists across scenery changes)
 
 function startCountdownTimer() {
   stopCountdownTimer();
-  timerTimeLeft = 600;
+
+  // Resume from remaining time if the session timer is already running
+  if (sessionTimerStartedAt !== null) {
+    const elapsedSeconds = Math.floor((Date.now() - sessionTimerStartedAt) / 1000);
+    timerTimeLeft = Math.max(0, ENVIRONMENT_SECONDS - elapsedSeconds);
+    console.log(`[Aura] Resuming countdown timer with ${timerTimeLeft}s remaining (${elapsedSeconds}s elapsed).`);
+  } else {
+    // First environment of the session — start fresh
+    sessionTimerStartedAt = Date.now();
+    timerTimeLeft = ENVIRONMENT_SECONDS;
+    console.log('[Aura] Starting fresh countdown timer at', ENVIRONMENT_SECONDS, 'seconds.');
+  }
+
+  if (timerTimeLeft <= 0) {
+    // Session already expired during the switch — finalize immediately
+    finalizeJourney();
+    return;
+  }
 
   const timerElement = document.getElementById('countdown-timer');
   const timeDisplay = document.getElementById('timer-time');
@@ -554,7 +572,9 @@ function startCountdownTimer() {
   }
 
   if (timeDisplay) {
-    timeDisplay.textContent = '10:00';
+    const mins = Math.floor(timerTimeLeft / 60);
+    const secs = timerTimeLeft % 60;
+    timeDisplay.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   countdownInterval = setInterval(() => {
@@ -573,7 +593,7 @@ function startCountdownTimer() {
     }
 
     if (timerTimeLeft === 60) {
-      console.log('[Aura] 120 seconds remaining - notifying backend');
+      console.log('[Aura] 60 seconds remaining - notifying backend');
       sendClientMessage('timer_update', { time_left: 60 });
     }
   }, 1000);
@@ -656,10 +676,25 @@ function startMenuAutoSelect(topEnv) {
 function startEnvironmentTimer() {
   if (environmentPhaseStarted) return;
   environmentPhaseStarted = true;
-  environmentTimer = setTimeout(() => {
-    console.log('[Aura] One-minute environment phase complete.');
+
+  // Calculate remaining time from the session anchor
+  let remainingMs = ENVIRONMENT_SECONDS * 1000;
+  if (sessionTimerStartedAt !== null) {
+    const elapsedMs = Date.now() - sessionTimerStartedAt;
+    remainingMs = Math.max(0, (ENVIRONMENT_SECONDS * 1000) - elapsedMs);
+    console.log(`[Aura] Environment timer set for ${Math.round(remainingMs / 1000)}s remaining.`);
+  }
+
+  if (remainingMs <= 0) {
+    console.log('[Aura] Session time already expired — finalizing immediately.');
     finalizeJourney();
-  }, ENVIRONMENT_SECONDS * 1000);
+    return;
+  }
+
+  environmentTimer = setTimeout(() => {
+    console.log('[Aura] Environment phase complete (session timer expired).');
+    finalizeJourney();
+  }, remainingMs);
 }
 
 function createEnvironmentCard(env, menuData, isRecommended, index = 0) {
@@ -880,6 +915,7 @@ function returnToStart() {
   hideFeedbackScreen();
   hideEnvironmentMenu();
   journeyStarted = false;
+  sessionTimerStartedAt = null; // Fully reset timer for a fresh session
   resetToIdle();
 
   introScreen.classList.remove('hidden');
@@ -896,13 +932,20 @@ function selectEnvironment(env, options = {}) {
   if (!env || env._selectionInProgress) return;
   env._selectionInProgress = true;
 
-  // Clear any existing flow timers (like feedback timer from previous tour)
-  clearFinalFlowTimers();
+  const switchingMidSession = tourState === "tour" || environmentPhaseStarted;
+
+  // When switching environments mid-session, preserve the session timer.
+  // Only clear menu/feedback timers, NOT the environment/countdown timers.
+  if (switchingMidSession) {
+    clearMenuTimers();
+    if (postTourFeedbackTimer) { clearTimeout(postTourFeedbackTimer); postTourFeedbackTimer = null; }
+  } else {
+    clearFinalFlowTimers();
+  }
 
   // Keep mic unmuted so user can say they want to exit or interrupt Aura
   micMuted = false;
   console.log("[Aura] Microphone remains active so user can request to exit.");
-  const switchingEnvironment = tourState === "tour" || environmentPhaseStarted;
   feedbackShownForCurrentTour = false;
   sendClientMessage('environment_selected', {
     scene_name: env.sceneName,
@@ -913,7 +956,8 @@ function selectEnvironment(env, options = {}) {
     recommendation_reason: latestMenuData?.reason || '',
     visual_started: true,
     automatic: Boolean(options.automatic),
-    switching_environment: switchingEnvironment
+    switching_environment: switchingMidSession
+
   });
   hideFeedbackScreen();
   hideEnvironmentMenu();
@@ -1005,6 +1049,7 @@ function resetToIdle() {
   console.log("[Aura] Microphone unmuted.");
   tourState = "idle";
   sphere.visible = true; // Restore orb after tour
+  sessionTimerStartedAt = null; // Fully reset timer anchor for a fresh session
   stopCountdownTimer();
 
   // Flush audio queue alignment completely on lobby reset
@@ -1296,8 +1341,21 @@ async function setupVideoSource(videoElement, src) {
 }
 
 function handleSceneChange(sceneName, subType, guidanceCategory, guidanceSubcategory) {
-  // Clear any active flow/feedback timers immediately when changing scenes to prevent out-of-nowhere popups
-  clearFinalFlowTimers();
+  // When switching scenery mid-session, only clear menu/feedback timers.
+  // Preserve the session countdown and environment timers so time carries over.
+  const isMidSessionSwitch = sessionTimerStartedAt !== null && (tourState === 'tour' || tourState === 'intro' || environmentPhaseStarted);
+  if (isMidSessionSwitch) {
+    console.log('[Aura] Mid-session scenery switch — preserving session timer.');
+    clearMenuTimers();
+    if (postTourFeedbackTimer) { clearTimeout(postTourFeedbackTimer); postTourFeedbackTimer = null; }
+    // Stop the old environment timer so startEnvironmentTimer() can re-create with correct remaining time
+    if (environmentTimer) { clearTimeout(environmentTimer); environmentTimer = null; }
+    environmentPhaseStarted = false;
+    // Stop the countdown interval so startCountdownTimer() can resume with correct remaining time
+    stopCountdownTimer();
+  } else {
+    clearFinalFlowTimers();
+  }
 
   console.log("[Aura] EXECUTING SCENE CHANGE TO:", sceneName, subType, guidanceCategory, guidanceSubcategory);
   const modeLabel = guidanceCategory && guidanceSubcategory
