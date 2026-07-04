@@ -1049,7 +1049,6 @@ function resetToIdle() {
   console.log("[Aura] Microphone unmuted.");
   tourState = "idle";
   sphere.visible = true; // Restore orb after tour
-  sessionTimerStartedAt = null; // Fully reset timer anchor for a fresh session
   stopCountdownTimer();
 
   // Flush audio queue alignment completely on lobby reset
