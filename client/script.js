@@ -170,26 +170,26 @@ function stopAmbientMusic() {
 function playPCMChunk(pcmData) {
   const int16Array = new Int16Array(pcmData.buffer, pcmData.byteOffset, pcmData.byteLength / 2);
   const buffer = audioCtx.createBuffer(1, int16Array.length, SPEAKER_SAMPLE_RATE);
-  const now = buffer.getChannelData(0);
+  const channelData = buffer.getChannelData(0);
   for (let i = 0; i < int16Array.length; i++) {
-    now[i] = int16Array[i] / 32768.0;
+    channelData[i] = int16Array[i] / 32768.0;
   }
 
   const source = audioCtx.createBufferSource();
   source.buffer = buffer;
   source.connect(analyser);
 
-  let startTime = Math.max(audioCtx.currentTime, nextPlayTime);
+  const currentTime = audioCtx.currentTime;
+  // If queue is empty or ran dry, schedule with a 50ms safety jitter buffer to absorb network variations
+  if (nextPlayTime < currentTime) {
+    nextPlayTime = currentTime + 0.05;
+  }
 
-  // Real-time audio queue alignment:
-  // Removed aggressive latency drift snap-back which caused overlapping audio chunks (stuttering/breaking)
-  // when used over networks like Cloudflared that may burst buffer WebSocket frames.
-
-  source.start(startTime);
-  nextPlayTime = startTime + buffer.duration;
+  source.start(nextPlayTime);
+  nextPlayTime += buffer.duration;
   activeAudioSources.push(source);
 
-  // Prevent massive Web Audio graph memory leaks by disconnecting dead nodes
+  // Prevent Web Audio graph memory leaks by disconnecting dead nodes
   source.onended = () => {
     source.disconnect();
     const idx = activeAudioSources.indexOf(source);
@@ -262,7 +262,7 @@ let _envConfigPromise = null;
 
 async function _loadEnvironmentConfig() {
   try {
-    const resp = await fetch('/client/environments.json');
+    const resp = await fetch('/client/environments.json?v=' + Date.now(), { cache: 'no-cache' });
     const config = await resp.json();
     const cats = config.categories;
     ENVIRONMENTS = config.environments.map(env => ({
@@ -402,74 +402,63 @@ async function startJourney(options = {}) {
 
   ws.onmessage = (event) => {
     let rawData = event.data;
-    let msg = null;
 
     if (typeof rawData === 'string') {
-      try { msg = JSON.parse(rawData); } catch (e) { }
-    } else {
-      // Try to decode binary as string to see if it's actually JSON
       try {
-        const dec = new TextDecoder().decode(rawData);
-        if (dec.startsWith('{') || dec.startsWith('[')) {
-          msg = JSON.parse(dec);
-          console.log("[Aura] RECOVERED JSON FROM BINARY:", msg);
+        const msg = JSON.parse(rawData);
+        console.log("[Aura] DATA MESSAGE:", msg);
+        const data = (msg.type === "app-message" && msg.data) ? msg.data : msg;
+        if (data.action === "user_started_speaking") {
+          console.log("[Aura] User started speaking, flushing audio queue.");
+          clearAudioQueue();
+        } else if (data.action === "trigger_scene") {
+          console.log("[Aura] TRIGGER DETECTED:", data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
+
+          const VIDEO_MAP = {};
+          if (Array.isArray(ENVIRONMENTS)) {
+            ENVIRONMENTS.forEach(env => { VIDEO_MAP[env.subType] = env.videoSrc; });
+          }
+          const FALLBACK_BY_SCENE = {
+            spiritual: '/stream/varanasi_river2.mp4',
+            meditation: '/stream/office_meditation.mp4',
+            nature: '/stream/forest_waterfall.mp4'
+          };
+          const targetSrc = VIDEO_MAP[data.sub_type] || FALLBACK_BY_SCENE[data.scene_name] || '/stream/varanasi_river2.mp4';
+          const isAlreadyPlaying = tourVideo.src.endsWith(targetSrc) && (tourState === 'tour' || tourState === 'intro');
+
+          if (!isAlreadyPlaying) {
+            clearAudioQueue();
+          }
+          hideEnvironmentMenu();
+          handleSceneChange(data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
+        } else if (data.action === "show_environment_menu") {
+          console.log("[Aura] MENU DETECTED:", data);
+          clearAudioQueue();
+          showEnvironmentMenu(data);
+        } else if (data.action === "show_voice_menu") {
+          console.log("[Aura] VOICE MENU DETECTED");
+          clearAudioQueue();
+          showVoiceMenu();
+        } else if (data.action === "stop_tour") {
+          console.log("[Aura] STOP REQUESTED BY BACKEND");
+          clearAudioQueue();
+          finalizeJourney({ notifyBackend: false });
+        } else if (data.action === "end_session") {
+          console.log("[Aura] END SESSION REQUESTED BY BACKEND", data);
+          clearAudioQueue();
+          environmentPhaseStarted = false;
+          resetToIdle();
+          if (data.show_feedback) {
+            showFeedbackScreen();
+          } else {
+            returnToStart();
+          }
         }
       } catch (e) { }
-    }
-
-    if (msg) {
-      console.log("[Aura] DATA MESSAGE:", msg);
-      const data = (msg.type === "app-message" && msg.data) ? msg.data : msg;
-      if (data.action === "user_started_speaking") {
-        console.log("[Aura] User started speaking, flushing audio queue.");
-        clearAudioQueue();
-      } else if (data.action === "trigger_scene") {
-        console.log("[Aura] TRIGGER DETECTED:", data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
-
-        // Auto-generated VIDEO_MAP matching handleSceneChange logic to check if we are already in/loading this scene
-        const VIDEO_MAP = {};
-        if (Array.isArray(ENVIRONMENTS)) {
-          ENVIRONMENTS.forEach(env => { VIDEO_MAP[env.subType] = env.videoSrc; });
-        }
-        const FALLBACK_BY_SCENE = {
-          spiritual: 'assets/visuals/varanasi_river.webm',
-          meditation: 'assets/visuals/office_meditation_2d.mp4',
-          nature: 'assets/visuals/nature_waterfall_2d.mp4'
-        };
-        const targetSrc = VIDEO_MAP[data.sub_type] || FALLBACK_BY_SCENE[data.scene_name] || 'assets/visuals/office_meditation_2d.mp4';
-        const isAlreadyPlaying = tourVideo.src.endsWith(targetSrc) && (tourState === 'tour' || tourState === 'intro');
-
-        if (!isAlreadyPlaying) {
-          clearAudioQueue(); // Safe flush at boundary!
-        }
-        hideEnvironmentMenu();
-        handleSceneChange(data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
-      } else if (data.action === "show_environment_menu") {
-        console.log("[Aura] MENU DETECTED:", data);
-        clearAudioQueue(); // Safe flush at boundary!
-        showEnvironmentMenu(data);
-      } else if (data.action === "show_voice_menu") {
-        console.log("[Aura] VOICE MENU DETECTED");
-        clearAudioQueue();
-        showVoiceMenu();
-      } else if (data.action === "stop_tour") {
-        console.log("[Aura] STOP REQUESTED BY BACKEND");
-        clearAudioQueue(); // Safe flush at boundary!
-        finalizeJourney({ notifyBackend: false });
-      } else if (data.action === "end_session") {
-        console.log("[Aura] END SESSION REQUESTED BY BACKEND", data);
-        clearAudioQueue(); // Safe flush at boundary!
-        environmentPhaseStarted = false;
-        resetToIdle();
-        if (data.show_feedback) {
-          showFeedbackScreen();
-        } else {
-          returnToStart();
-        }
-      }
-    } else if (rawData instanceof ArrayBuffer || rawData instanceof Uint8Array || rawData instanceof Blob) {
-      // It's pure audio
+    } else if (rawData instanceof ArrayBuffer) {
       playPCMChunk(new Uint8Array(rawData));
+    } else if (rawData instanceof Blob) {
+      rawData.arrayBuffer().then(buf => playPCMChunk(new Uint8Array(buf)));
     }
   };
 
@@ -1381,9 +1370,9 @@ function handleSceneChange(sceneName, subType, guidanceCategory, guidanceSubcate
   ENVIRONMENTS.forEach(env => { VIDEO_MAP[env.subType] = env.videoSrc; });
 
   const FALLBACK_BY_SCENE = {
-    spiritual: 'assets/visuals/varanasi_river.webm',
-    meditation: 'assets/visuals/office_meditation_2d.mp4',
-    nature: 'assets/visuals/nature_waterfall_2d.mp4'
+    spiritual: '/stream/varanasi_river2.mp4',
+    meditation: '/stream/office_meditation.mp4',
+    nature: '/stream/forest_waterfall.mp4'
   };
 
   const targetSrc = VIDEO_MAP[subType] || FALLBACK_BY_SCENE[sceneName] || 'assets/visuals/office_meditation_2d.mp4';

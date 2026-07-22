@@ -402,17 +402,18 @@ async def stream_video(filename: str, request: Request, range: str = Header(None
         end = min(end, file_size - 1)
         length = end - start + 1
 
-        def file_iterator():
+        async def file_iterator():
             with open(video_path, "rb") as f:
                 f.seek(start)
                 bytes_left = length
                 while bytes_left > 0:
-                    chunk_size = min(8192, bytes_left)
+                    chunk_size = min(256 * 1024, bytes_left)
                     chunk = f.read(chunk_size)
                     if not chunk:
                         break
                     yield chunk
                     bytes_left -= len(chunk)
+                    await asyncio.sleep(0) # Yield event loop control to keep WebSockets and Gemini Live buttery smooth
 
         headers = {
             "Content-Range": f"bytes {start}-{end}/{file_size}",
@@ -422,13 +423,14 @@ async def stream_video(filename: str, request: Request, range: str = Header(None
         }
         return StreamingResponse(file_iterator(), status_code=206, headers=headers)
     else:
-        def file_iterator():
+        async def file_iterator():
             with open(video_path, "rb") as f:
                 while True:
-                    chunk = f.read(8192)
+                    chunk = f.read(256 * 1024)
                     if not chunk:
                         break
                     yield chunk
+                    await asyncio.sleep(0) # Yield event loop control
         headers = {
             "Accept-Ranges": "bytes",
             "Content-Length": str(file_size),
