@@ -464,13 +464,21 @@ const { scene, renderer, camera, sphere, geometry, particleCount,
     }
 
     // Handle Compositor Layer (XRMediaBinding)
+    // DISABLED: Quest ignores offset-space rotation on equirectLayer, causing video
+    // to appear misaligned. Using the VideoTexture sphere (with rotation fix) instead.
+    // The Three.js VideoTexture approach provides reliable rotation control.
+    /*
     const session = renderer.xr.getSession();
     if (session && vrState.mediaBinding) {
       if (showing) {
         try {
           if (!vrState.equirectLayer) {
+            const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.PI / 2);
+            const offsetSpace = renderer.xr.getReferenceSpace().getOffsetReferenceSpace(
+              new XRRigidTransform({x: 0, y: 0, z: 0}, {x: q.x, y: q.y, z: q.z, w: q.w})
+            );
             vrState.equirectLayer = vrState.mediaBinding.createEquirectLayer(tourVideo, {
-              space: renderer.xr.getReferenceSpace(),
+              space: offsetSpace,
               layout: 'mono',
               radius: 200
             });
@@ -494,6 +502,7 @@ const { scene, renderer, camera, sphere, geometry, particleCount,
         vrState.videoSphere.visible = false;
       }
     }
+    */
 
     if (showing) {
       sphere.material.size = 0.002;

@@ -456,6 +456,8 @@ export function createVideoSphere(videoElement) {
   // and ensure the sphere renders strictly behind all foreground elements.
   const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.FrontSide, depthWrite: false, transparent: true });
   const mesh = new THREE.Mesh(geo, mat);
+  // Rotate -90° on Y so the equirectangular center (u=0.5, at -X after scale flip) faces -Z (VR forward)
+  mesh.rotation.y = -Math.PI / 2;
   mesh.renderOrder = -10;
   mesh.visible = false;
   mesh.userData.videoTexture = tex;
