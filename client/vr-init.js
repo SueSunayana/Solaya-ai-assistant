@@ -464,55 +464,11 @@ const { scene, renderer, camera, sphere, geometry, particleCount,
     }
 
     // Handle Compositor Layer (XRMediaBinding)
+    // Disabled equirectLayer to avoid centering issues; fall back to the video texture sphere.
     const session = renderer.xr.getSession();
     if (session && vrState.mediaBinding) {
-      if (showing) {
-        try {
-          if (!vrState.equirectLayer) {
-            let layerTransform = null;
-            if ('XRRigidTransform' in window) {
-              try {
-                // Rotate -90 deg (-Math.PI / 2) around Y axis so u=0.5 (center of video) faces forward (-Z axis)
-                const angle = -Math.PI / 2;
-                const halfAngle = angle / 2;
-                layerTransform = new XRRigidTransform(
-                  { x: 0, y: 0, z: 0 },
-                  { x: 0, y: Math.sin(halfAngle), z: 0, w: Math.cos(halfAngle) }
-                );
-              } catch (e) {
-                console.warn('[Aura VR] XRRigidTransform initialization warning:', e);
-              }
-            }
-
-            const layerInit = {
-              space: renderer.xr.getReferenceSpace(),
-              layout: 'mono',
-              radius: 200
-            };
-            if (layerTransform) {
-              layerInit.transform = layerTransform;
-            }
-
-            vrState.equirectLayer = vrState.mediaBinding.createEquirectLayer(tourVideo, layerInit);
-          }
-          session.updateRenderState({
-            layers: [vrState.equirectLayer, session.renderState.baseLayer]
-          });
-          vrState.videoSphere.visible = false; // Hide WebGL texture fallback
-        } catch (e) {
-          console.warn('[Aura VR] Failed to add equirectLayer, using VideoTexture fallback', e);
-          vrState.videoSphere.visible = true;
-        }
-      } else {
-        if (vrState.equirectLayer) {
-          try {
-            session.updateRenderState({
-              layers: [session.renderState.baseLayer]
-            });
-          } catch (e) { }
-        }
-        vrState.videoSphere.visible = false;
-      }
+      // Simply ensure the video sphere is used for all cases.
+      vrState.videoSphere.visible = showing;
     }
 
     if (showing) {

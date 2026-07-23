@@ -400,66 +400,87 @@ async function startJourney(options = {}) {
     }
   };
 
-  ws.onmessage = (event) => {
+  function handleAppMessage(msg) {
+    if (!msg) return;
+    console.log("[Aura] DATA MESSAGE:", msg);
+    const data = (msg.type === "app-message" && msg.data) ? msg.data : msg;
+    if (data.action === "user_started_speaking") {
+      console.log("[Aura] User started speaking / interrupted, flushing audio queue.");
+      clearAudioQueue();
+    } else if (data.action === "trigger_scene") {
+      console.log("[Aura] TRIGGER DETECTED:", data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
+      const VIDEO_MAP = {};
+      if (Array.isArray(ENVIRONMENTS)) {
+        ENVIRONMENTS.forEach(env => { VIDEO_MAP[env.subType] = env.videoSrc; });
+      }
+      const FALLBACK_BY_SCENE = {
+        spiritual: '/stream/varanasi_river2.mp4',
+        meditation: '/stream/office_meditation.mp4',
+        nature: '/stream/forest_waterfall.mp4'
+      };
+      const targetSrc = VIDEO_MAP[data.sub_type] || FALLBACK_BY_SCENE[data.scene_name] || '/stream/varanasi_river2.mp4';
+      const isAlreadyPlaying = tourVideo.src.endsWith(targetSrc) && (tourState === 'tour' || tourState === 'intro');
+
+      if (!isAlreadyPlaying) {
+        clearAudioQueue();
+      }
+      hideEnvironmentMenu();
+      handleSceneChange(data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
+    } else if (data.action === "show_environment_menu") {
+      console.log("[Aura] MENU DETECTED:", data);
+      clearAudioQueue();
+      showEnvironmentMenu(data);
+    } else if (data.action === "show_voice_menu") {
+      console.log("[Aura] VOICE MENU DETECTED");
+      clearAudioQueue();
+      showVoiceMenu();
+    } else if (data.action === "stop_tour") {
+      console.log("[Aura] STOP REQUESTED BY BACKEND");
+      clearAudioQueue();
+      finalizeJourney({ notifyBackend: false });
+    } else if (data.action === "end_session") {
+      console.log("[Aura] END SESSION REQUESTED BY BACKEND", data);
+      clearAudioQueue();
+      environmentPhaseStarted = false;
+      resetToIdle();
+      if (data.show_feedback) {
+        showFeedbackScreen();
+      } else {
+        returnToStart();
+      }
+    }
+  }
+
+  ws.onmessage = async (event) => {
     let rawData = event.data;
 
     if (typeof rawData === 'string') {
-      try {
-        const msg = JSON.parse(rawData);
-        console.log("[Aura] DATA MESSAGE:", msg);
-        const data = (msg.type === "app-message" && msg.data) ? msg.data : msg;
-        if (data.action === "user_started_speaking") {
-          console.log("[Aura] User started speaking, flushing audio queue.");
-          clearAudioQueue();
-        } else if (data.action === "trigger_scene") {
-          console.log("[Aura] TRIGGER DETECTED:", data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
-
-          const VIDEO_MAP = {};
-          if (Array.isArray(ENVIRONMENTS)) {
-            ENVIRONMENTS.forEach(env => { VIDEO_MAP[env.subType] = env.videoSrc; });
-          }
-          const FALLBACK_BY_SCENE = {
-            spiritual: '/stream/varanasi_river2.mp4',
-            meditation: '/stream/office_meditation.mp4',
-            nature: '/stream/forest_waterfall.mp4'
-          };
-          const targetSrc = VIDEO_MAP[data.sub_type] || FALLBACK_BY_SCENE[data.scene_name] || '/stream/varanasi_river2.mp4';
-          const isAlreadyPlaying = tourVideo.src.endsWith(targetSrc) && (tourState === 'tour' || tourState === 'intro');
-
-          if (!isAlreadyPlaying) {
-            clearAudioQueue();
-          }
-          hideEnvironmentMenu();
-          handleSceneChange(data.scene_name, data.sub_type, data.guidance_category, data.guidance_subcategory);
-        } else if (data.action === "show_environment_menu") {
-          console.log("[Aura] MENU DETECTED:", data);
-          clearAudioQueue();
-          showEnvironmentMenu(data);
-        } else if (data.action === "show_voice_menu") {
-          console.log("[Aura] VOICE MENU DETECTED");
-          clearAudioQueue();
-          showVoiceMenu();
-        } else if (data.action === "stop_tour") {
-          console.log("[Aura] STOP REQUESTED BY BACKEND");
-          clearAudioQueue();
-          finalizeJourney({ notifyBackend: false });
-        } else if (data.action === "end_session") {
-          console.log("[Aura] END SESSION REQUESTED BY BACKEND", data);
-          clearAudioQueue();
-          environmentPhaseStarted = false;
-          resetToIdle();
-          if (data.show_feedback) {
-            showFeedbackScreen();
-          } else {
-            returnToStart();
-          }
-        }
-      } catch (e) { }
-    } else if (rawData instanceof ArrayBuffer) {
-      playPCMChunk(new Uint8Array(rawData));
-    } else if (rawData instanceof Blob) {
-      rawData.arrayBuffer().then(buf => playPCMChunk(new Uint8Array(buf)));
+      try { handleAppMessage(JSON.parse(rawData)); } catch (e) { }
+      return;
     }
+
+    let bytes = null;
+    if (rawData instanceof ArrayBuffer) {
+      bytes = new Uint8Array(rawData);
+    } else if (rawData instanceof Blob) {
+      bytes = new Uint8Array(await rawData.arrayBuffer());
+    } else if (rawData instanceof Uint8Array) {
+      bytes = rawData;
+    }
+
+    if (!bytes || bytes.length === 0) return;
+
+    // Fast check: ASCII 123 is '{' and ASCII 91 is '[' for JSON frames
+    if (bytes[0] === 123 || bytes[0] === 91) {
+      try {
+        const text = new TextDecoder().decode(bytes);
+        handleAppMessage(JSON.parse(text));
+        return;
+      } catch (e) { }
+    }
+
+    // Pure binary audio PCM
+    playPCMChunk(bytes);
   };
 
   ws.onclose = () => {

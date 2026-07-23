@@ -93,7 +93,8 @@ class LocalPCMRawSerializer(FrameSerializer):
             return frame.audio
         if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             return json.dumps({"type": "app-message", "data": frame.message})
-        if isinstance(frame, UserStartedSpeakingFrame):
+        frame_name = type(frame).__name__
+        if isinstance(frame, UserStartedSpeakingFrame) or "Interruption" in frame_name:
             return json.dumps({"type": "app-message", "data": {"action": "user_started_speaking"}})
         return None
 
