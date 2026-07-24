@@ -239,6 +239,7 @@ let environmentTimer = null;
 let postTourFeedbackTimer = null;
 let topRecommendedEnvironment = null;
 let environmentPhaseStarted = false;
+let sessionTimerStarted = false; // Tracks if the 10-min session countdown has begun (survives scene changes)
 let micMuted = false;
 let activeMicStream = null;
 let activeMicSource = null;
@@ -544,7 +545,12 @@ let timerTimeLeft = 600;
 
 function startCountdownTimer() {
   stopCountdownTimer();
-  timerTimeLeft = 600;
+
+  // Only reset to 600s on the FIRST environment start. On scene changes, continue from remaining time.
+  if (!sessionTimerStarted) {
+    timerTimeLeft = 600;
+    sessionTimerStarted = true;
+  }
 
   const timerElement = document.getElementById('countdown-timer');
   const timeDisplay = document.getElementById('timer-time');
@@ -554,7 +560,9 @@ function startCountdownTimer() {
   }
 
   if (timeDisplay) {
-    timeDisplay.textContent = '10:00';
+    const mins = Math.floor(timerTimeLeft / 60);
+    const secs = timerTimeLeft % 60;
+    timeDisplay.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   countdownInterval = setInterval(() => {
@@ -654,12 +662,18 @@ function startMenuAutoSelect(topEnv) {
 }
 
 function startEnvironmentTimer() {
-  if (environmentPhaseStarted) return;
+  // Clear any existing environment timer before starting a new one
+  if (environmentTimer) { clearTimeout(environmentTimer); environmentTimer = null; }
   environmentPhaseStarted = true;
+
+  // Use the remaining countdown time instead of the full ENVIRONMENT_SECONDS,
+  // so switching scenes doesn't restart the session clock.
+  const remainingMs = timerTimeLeft * 1000;
+  console.log(`[Aura] Environment timer set for ${timerTimeLeft}s (remaining session time).`);
   environmentTimer = setTimeout(() => {
-    console.log('[Aura] One-minute environment phase complete.');
+    console.log('[Aura] Environment phase complete (session time expired).');
     finalizeJourney();
-  }, ENVIRONMENT_SECONDS * 1000);
+  }, remainingMs);
 }
 
 function createEnvironmentCard(env, menuData, isRecommended, index = 0) {
@@ -881,6 +895,7 @@ function returnToStart() {
   hideEnvironmentMenu();
   journeyStarted = false;
   resetToIdle();
+  sessionTimerStarted = false; // Reset so next overall session starts fresh at 10:00
 
   introScreen.classList.remove('hidden');
   joinBtn.style.display = 'inline-block';
