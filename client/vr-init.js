@@ -84,6 +84,10 @@ const { scene, renderer, camera, sphere, geometry, particleCount,
     );
     vrState.statusPanel.lookAt(pos);
     vrState.statusPanel.visible = true;
+    const statusEl = document.getElementById('status');
+    if (statusEl) {
+      updateTextPanel(vrState.statusPanel, statusEl.innerText);
+    }
   }
 
   // ---- VR Button ----
